@@ -9,7 +9,7 @@ description = "Desktop UI for the Schnabel historical-recording U-Net denoiser, 
 [dependencies]
 gpui-kit = "0.9"
 hound = "3.5"
-ndarray = "0.16"
+ndarray = "0.17"
 ort = "=2.0.0-rc.15"
 rubato = "=0.16.2"
 rustfft = "6"
