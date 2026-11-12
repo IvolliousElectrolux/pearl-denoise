@@ -4,9 +4,9 @@ use std::sync::mpsc::{self, TryRecvError};
 use std::sync::Arc;
 use std::time::Duration;
 
-use gpui_kit::component::button::Button;
-use gpui_kit::gpui_component::button::ButtonVariants as _;
+use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::progress::Progress as ProgressBar;
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::*;
 use gpui_kit::*;
