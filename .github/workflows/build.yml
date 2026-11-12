@@ -45,7 +45,7 @@ jobs:
       - name: Export ONNX
         run: |
           python -m pip install --upgrade pip
-          python -m pip install tensorflow tf2onnx onnx onnxruntime numpy
+          python -m pip install "numpy<2" "tensorflow==2.15.1" "tf2onnx==1.16.1" "onnxruntime==1.17.3"
           python tools/export_onnx.py --checkpoint .cache/ckpt/checkpoint --out model.onnx
       - uses: actions/upload-artifact@v4
         with:
