@@ -1,0 +1,97 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  model:
+    name: Export U-Net
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Add swap
+        run: |
+          sudo fallocate -l 8G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+      - name: Download Schnabel checkpoint
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p .cache
+          ok=0
+          for i in $(seq 1 60); do
+            if gh release download weights --pattern checkpoint.zip --dir .cache --clobber; then
+              ok=1
+              break
+            fi
+            echo "waiting for the weights release ($i)"
+            sleep 30
+          done
+          test "$ok" = 1
+          unzip -o .cache/checkpoint.zip -d .cache/ckpt
+      - name: Export ONNX
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install tensorflow tf2onnx onnx onnxruntime numpy
+          python tools/export_onnx.py --checkpoint .cache/ckpt/checkpoint --out model.onnx
+      - uses: actions/upload-artifact@v4
+        with:
+          name: unet-onnx
+          path: |
+            model.onnx
+            model.json
+
+  desktop:
+    name: ${{ matrix.artifact }}
+    needs: model
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: pearl-denoise-windows
+            bin: target/release/pearl-denoise.exe
+          - os: macos-latest
+            artifact: pearl-denoise-macos
+            bin: target/release/pearl-denoise
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/download-artifact@v4
+        with:
+          name: unet-onnx
+          path: model
+      - name: Test
+        run: cargo test --lib --release
+      - name: Build
+        run: cargo build --release
+      - name: Stage
+        run: |
+          mkdir -p dist
+          bin_dir=$(dirname "${{ matrix.bin }}")
+          cp "${{ matrix.bin }}" dist/
+          cp model/model.onnx dist/model.onnx
+          cp model/model.json dist/model.json
+          shopt -s nullglob
+          cp "$bin_dir"/*onnxruntime* dist/ || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/
