@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gpui_kit::component::button::Button;
+use gpui_kit::gpui_component::button::ButtonVariants as _;
 use gpui_kit::component::progress::Progress as ProgressBar;
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::*;
@@ -198,7 +199,7 @@ impl Render for DenoiseApp {
             .size_full()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
-            .overflow_y_scroll()
+            .overflow_y_scrollbar()
             .child(
                 v_flex()
                     .size_full()
@@ -268,7 +269,7 @@ fn path_card(title: &str, path: &str, cx: &mut Context<DenoiseApp>) -> impl Into
         .rounded_md()
         .border_1()
         .border_color(cx.theme().border)
-        .bg(cx.theme().surface)
+        .bg(cx.theme().secondary)
         .child(div().text_sm().child(title.to_string()))
         .child(div().text_sm().child(path.to_string()))
 }
