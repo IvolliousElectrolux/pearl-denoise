@@ -20,10 +20,12 @@ jobs:
           python-version: "3.11"
       - name: Add swap
         run: |
-          sudo fallocate -l 8G /swapfile
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
+          if ! swapon --show | grep -q .; then
+            sudo fallocate -l 8G /swapfile
+            sudo chmod 600 /swapfile
+            sudo mkswap /swapfile
+            sudo swapon /swapfile
+          fi
       - name: Download Schnabel checkpoint
         env:
           GH_TOKEN: ${{ github.token }}
