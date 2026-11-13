@@ -101,7 +101,7 @@ fn suppress_floor(
             raised * raised
         })
         .collect();
-    let coherent = window.iter().sum::<f32>() / (2.0 * fft_len as f32);
+    let coherent = window.iter().sum::<f32>() / 2.0;
     let mut planner = FftPlanner::<f32>::new();
     let fft = planner.plan_fft_forward(fft_len);
     let ifft = planner.plan_fft_inverse(fft_len);
