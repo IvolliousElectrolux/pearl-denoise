@@ -12,11 +12,18 @@ use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::*;
 use gpui_kit::*;
-use pearl_denoise::{denoise_file, find_model, Progress};
+use pearl_denoise::{denoise_file, find_model, reduce_hiss_file, DenoiseError, Progress};
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Method {
+    Schnabel,
+    Hiss,
+}
 
 struct DenoiseApp {
     input: Option<PathBuf>,
     output: Option<PathBuf>,
+    method: Method,
     status: String,
     percent: f32,
     busy: bool,
@@ -30,7 +37,8 @@ impl DenoiseApp {
         Self {
             input: None,
             output: None,
-            status: "选择一段录音, 再用施纳贝尔流程里的 U-Net 降噪. 不会加混响.".into(),
+            method: Method::Schnabel,
+            status: "先选择处理方式, 再选择录音. 两种都不加混响.".into(),
             percent: 0.0,
             busy: false,
             picker: None,
@@ -56,7 +64,7 @@ impl DenoiseApp {
             };
             if let Some(path) = picked {
                 this.update(cx, |this, cx| {
-                    this.output = Some(default_output(&path));
+                    this.output = Some(default_output(&path, this.method));
                     this.input = Some(path);
                     this.status = "已选择输入".into();
                     cx.notify();
@@ -76,11 +84,12 @@ impl DenoiseApp {
             .and_then(|path| path.parent().map(PathBuf::from))
             .or_else(|| std::env::current_dir().ok())
             .unwrap_or_else(|| PathBuf::from("."));
+        let method = self.method;
         let name = self
             .input
             .as_ref()
             .map(|path| {
-                default_output(path)
+                default_output(path, method)
                     .file_name()
                     .and_then(|name| name.to_str())
                     .unwrap_or("denoised.wav")
@@ -118,19 +127,30 @@ impl DenoiseApp {
             cx.notify();
             return;
         };
-        let model = match find_model() {
-            Ok(path) => path,
-            Err(err) => {
-                self.status = err.to_string();
-                cx.notify();
-                return;
+        let method = self.method;
+        let model = if method == Method::Schnabel {
+            match find_model() {
+                Ok(path) => Some(path),
+                Err(err) => {
+                    self.status = err.to_string();
+                    cx.notify();
+                    return;
+                }
             }
+        } else {
+            None
         };
         let progress = Arc::new(Progress::new());
         let worker_progress = Arc::clone(&progress);
         let (sender, receiver) = mpsc::channel();
         std::thread::spawn(move || {
-            let result = denoise_file(&input, &output, &model, &worker_progress);
+            let result = match method {
+                Method::Schnabel => match model.as_deref() {
+                    Some(model) => denoise_file(&input, &output, model, &worker_progress),
+                    None => Err(DenoiseError::new("施纳贝尔模式需要模型")),
+                },
+                Method::Hiss => reduce_hiss_file(&input, &output, &worker_progress),
+            };
             let _ = sender.send(result);
         });
         self.busy = true;
@@ -176,6 +196,28 @@ impl DenoiseApp {
         cx.notify();
     }
 
+    fn set_method(&mut self, method: Method, cx: &mut Context<Self>) {
+        if self.busy || self.method == method {
+            return;
+        }
+        self.method = method;
+        if let Some(input) = self.input.clone() {
+            let previous = self.output.clone();
+            let auto = [Method::Schnabel, Method::Hiss]
+                .into_iter()
+                .map(|mode| default_output(&input, mode))
+                .collect::<Vec<_>>();
+            if previous.as_ref().is_none_or(|path| auto.iter().any(|item| item == path)) {
+                self.output = Some(default_output(&input, method));
+            }
+        }
+        self.status = match method {
+            Method::Schnabel => "已选择施纳贝尔 U-Net".into(),
+            Method::Hiss => "已选择高频嘶声".into(),
+        };
+        cx.notify();
+    }
+
     fn cancel_job(&mut self, cx: &mut Context<Self>) {
         if let Some(progress) = &self.cancel {
             progress.cancel.store(true, Ordering::SeqCst);
@@ -212,10 +254,27 @@ impl Render for DenoiseApp {
                             .gap_1()
                             .child(div().text_xl().child("Pearl Denoise"))
                             .child(
-                                div().text_sm().child(
-                                    "施纳贝尔修复用的两级 U-Net, 44.1 kHz, STFT 2048 / 512, 5 秒一段, 重叠 2048. 不追加混响.",
-                                ),
+                                div().text_sm().child(match self.method {
+                                    Method::Schnabel => "施纳贝尔修复用的两级 U-Net, 44.1 kHz, STFT 2048 / 512, 5 秒一段, 重叠 2048. 不追加混响.",
+                                    Method::Hiss => "只处理 6500 Hz 以上. 底噪按 -64 dB 估计, 最多削 12 dB, 不跟踪. 中低频保持原样.",
+                                }),
                             ),
+                    )
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .child(self.method_button(
+                                "mode-unet",
+                                "施纳贝尔 U-Net",
+                                Method::Schnabel,
+                                cx,
+                            ))
+                            .child(self.method_button(
+                                "mode-hiss",
+                                "高频嘶声",
+                                Method::Hiss,
+                                cx,
+                            )),
                     )
                     .child(path_card("输入", &input, cx))
                     .child(path_card("输出", &output, cx))
@@ -263,6 +322,25 @@ impl Render for DenoiseApp {
     }
 }
 
+impl DenoiseApp {
+    fn method_button(
+        &self,
+        id: &'static str,
+        label: &'static str,
+        method: Method,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let mut button = Button::new(id)
+            .label(label)
+            .disabled(self.busy)
+            .on_click(cx.listener(move |this, _, _, cx| this.set_method(method, cx)));
+        if self.method == method {
+            button = button.primary();
+        }
+        button
+    }
+}
+
 fn path_card(title: &str, path: &str, cx: &mut Context<DenoiseApp>) -> impl IntoElement {
     v_flex()
         .gap_1()
@@ -276,12 +354,16 @@ fn path_card(title: &str, path: &str, cx: &mut Context<DenoiseApp>) -> impl Into
         .child(div().text_sm().child(path.to_string()))
 }
 
-fn default_output(input: &std::path::Path) -> PathBuf {
+fn default_output(input: &std::path::Path, method: Method) -> PathBuf {
     let stem = input
         .file_stem()
         .and_then(|stem| stem.to_str())
         .unwrap_or("denoised");
-    let name = format!("{stem}.denoised.wav");
+    let tag = match method {
+        Method::Schnabel => "denoised",
+        Method::Hiss => "hiss",
+    };
+    let name = format!("{stem}.{tag}.wav");
     match input.parent() {
         Some(parent) => parent.join(name),
         None => PathBuf::from(name),
@@ -307,7 +389,7 @@ fn main() {
             gpui_kit::init(cx);
             let bounds = Bounds {
                 origin: point(px(120.), px(80.)),
-                size: size(px(760.), px(560.)),
+                size: size(px(760.), px(640.)),
             };
             gpui_kit::open_window(
                 WindowOptions {

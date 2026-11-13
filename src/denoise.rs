@@ -42,13 +42,13 @@ impl Progress {
         }
     }
 
-    fn set_status(&self, text: impl Into<String>) {
+    pub(crate) fn set_status(&self, text: impl Into<String>) {
         if let Ok(mut status) = self.status.lock() {
             *status = text.into();
         }
     }
 
-    fn cancelled(&self) -> bool {
+    pub(crate) fn cancelled(&self) -> bool {
         self.cancel.load(Ordering::SeqCst)
     }
 }
@@ -169,7 +169,7 @@ pub fn denoise_file(
         "{}.restoring.wav",
         output.file_name().and_then(|name| name.to_str()).unwrap_or("out.wav")
     ));
-    write_pcm16(&temporary, &denoised)?;
+    write_pcm16(&temporary, &denoised, crate::stft::SAMPLE_RATE)?;
     if progress.cancelled() {
         let _ = std::fs::remove_file(&temporary);
         return Err(DenoiseError::new("已取消"));

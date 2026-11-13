@@ -169,7 +169,7 @@ pub fn to_model_rate(channels: Vec<Vec<f32>>, from: u32) -> Result<Vec<Vec<f32>>
     Ok(output)
 }
 
-pub fn write_pcm16(path: &Path, channels: &[Vec<f32>]) -> Result<(), DenoiseError> {
+pub fn write_pcm16(path: &Path, channels: &[Vec<f32>], sample_rate: u32) -> Result<(), DenoiseError> {
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
             std::fs::create_dir_all(parent)
@@ -178,7 +178,7 @@ pub fn write_pcm16(path: &Path, channels: &[Vec<f32>]) -> Result<(), DenoiseErro
     }
     let spec = hound::WavSpec {
         channels: channels.len() as u16,
-        sample_rate: SAMPLE_RATE,
+        sample_rate,
         bits_per_sample: 16,
         sample_format: hound::SampleFormat::Int,
     };
