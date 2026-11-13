@@ -14,4 +14,4 @@ ort = "=2.0.0-rc.15"
 rubato = "=0.16.2"
 rustfft = "6"
 serde_json = "1"
-symphonia = { version = "0.5", features = ["aiff", "flac", "mp3", "wav"] }
+symphonia = { version = "0.5", features = ["aac", "aiff", "alac", "flac", "isomp4", "mp3", "wav"] }

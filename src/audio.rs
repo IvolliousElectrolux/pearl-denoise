@@ -2,7 +2,7 @@ use std::fs::File;
 use std::path::Path;
 
 use symphonia::core::audio::SampleBuffer;
-use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
+use symphonia::core::codecs::{CodecParameters, DecoderOptions, CODEC_TYPE_NULL};
 use symphonia::core::errors::Error as SymphoniaError;
 use symphonia::core::formats::FormatOptions;
 use symphonia::core::io::MediaSourceStream;
@@ -23,16 +23,37 @@ pub fn read_audio(path: &Path) -> Result<(Vec<Vec<f32>>, u32), DenoiseError> {
         .format(&hint, stream, &FormatOptions::default(), &MetadataOptions::default())
         .map_err(|err| DenoiseError::new(format!("无法识别音频: {err}")))?;
     let mut format = probed.format;
-    let track = format
+    let candidates: Vec<(u32, CodecParameters)> = format
         .tracks()
         .iter()
-        .find(|track| track.codec_params.codec != CODEC_TYPE_NULL)
-        .ok_or_else(|| DenoiseError::new("没有音频轨"))?;
-    let track_id = track.id;
-    let sample_rate = track.codec_params.sample_rate.unwrap_or(SAMPLE_RATE);
-    let mut decoder = symphonia::default::get_codecs()
-        .make(&track.codec_params, &DecoderOptions::default())
-        .map_err(|err| DenoiseError::new(format!("无法解码: {err}")))?;
+        .filter(|track| {
+            track.codec_params.codec != CODEC_TYPE_NULL
+                && (track.codec_params.sample_rate.is_some()
+                    || track.codec_params.channels.is_some())
+        })
+        .map(|track| (track.id, track.codec_params.clone()))
+        .collect();
+    if candidates.is_empty() {
+        return Err(DenoiseError::new(
+            "没有音频轨. 如果这是一段录像, 需要里面带可解码的音轨.",
+        ));
+    }
+    let mut codecs = symphonia::default::get_codecs();
+    let mut opened = None;
+    let mut last_error = String::new();
+    for (track_id, params) in &candidates {
+        match codecs.make(params, &DecoderOptions::default()) {
+            Ok(decoder) => {
+                let sample_rate = params.sample_rate.unwrap_or(SAMPLE_RATE);
+                opened = Some((*track_id, sample_rate, decoder));
+                break;
+            }
+            Err(err) => last_error = err.to_string(),
+        }
+    }
+    let Some((track_id, sample_rate, mut decoder)) = opened else {
+        return Err(DenoiseError::new(format!("无法解码: {last_error}")));
+    };
 
     let mut channels: Vec<Vec<f32>> = Vec::new();
     let mut sample_buf: Option<SampleBuffer<f32>> = None;
