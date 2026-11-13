@@ -144,7 +144,11 @@ fn suppress_floor(
             };
             *slot = 10f32.powf(-reduction / 20.0);
         }
+        let raw = gain.clone();
         smooth_gain(&mut gain, GAIN_SMOOTH);
+        for (slot, original) in gain.iter_mut().zip(raw) {
+            *slot = slot.max(original);
+        }
         for bin in 0..bins {
             buf[bin] *= gain[bin];
         }
