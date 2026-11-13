@@ -231,7 +231,8 @@ fn butterworth(freq: f32, sample_rate: u32, high: bool) -> Biquad {
 }
 
 fn run_pair(pair: &mut [Biquad; 2], sample: f32) -> f32 {
-    pair[1].tick(pair[0].tick(sample))
+    let mid = pair[0].tick(sample);
+    pair[1].tick(mid)
 }
 
 impl Biquad {
